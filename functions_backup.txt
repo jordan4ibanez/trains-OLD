@@ -1,0 +1,227 @@
+--[[
+north +x
+south -x
+east  +z
+west  -z
+]]
+--train group 1 for track, and 2 for buffers
+function train_on_track(self,position)
+	--see if block in the way and if track ahead
+	local location = self.object:getpos()
+	local currentnode = minetest.get_node_group(minetest.get_node(location).name, "track")
+	
+	if self.direction == "north" then
+		print("north "..self.position)
+		if minetest.get_node_group(minetest.get_node({x=location.x+0.45, y=location.y, z=location.z}).name, "track") == 1 then
+			self.on_track = true
+		else
+			self.on_track = false
+		end		
+	elseif self.direction == "south" then
+		print("south "..self.position)
+		if minetest.get_node_group(minetest.get_node({x=location.x-0.45, y=location.y, z=location.z}).name, "track") == 1 then
+			self.on_track = true
+		else
+			self.on_track = false
+		end		
+	elseif self.direction == "east" then
+		print("east "..self.position)
+		if minetest.get_node_group(minetest.get_node({x=location.x, y=location.y, z=location.z+0.45}).name, "track") == 1 then
+			self.on_track = true
+		else
+			self.on_track = false
+		end		
+	elseif self.direction == "west" then
+		print("west "..self.position)
+		if minetest.get_node_group(minetest.get_node({x=location.x, y=location.y, z=location.z-0.45}).name, "track") == 1 then
+			self.on_track = true
+		else
+			print("off track "..self.position)
+			self.on_track = false
+		end		
+	else
+		--make this true so that it can set up the train for the first time
+		--also make the placement of the train scan the nodes in between the trucks for all rails
+		self.on_track = true
+	end
+	
+	
+	if self.on_track == true and self.cotruck.on_track == true then
+		self.on_track = true
+		--correct center
+		if self.direction == "north" or self.direction == "south" then
+			local correctionpos = self.object:getpos()
+			self.object:setpos({x=correctionpos.x,y=correctionpos.y,z=math.floor(correctionpos.z + 0.5)})
+		elseif self.direction == "east" or self.direction == "west" then
+			local correctionpos = self.object:getpos()
+			self.object:setpos({x=math.floor(correctionpos.x + 0.5),y=correctionpos.y,z=correctionpos.z})
+		else
+			print("somethings broken!!! here is the direction: "..dump(self.direction))
+		end
+		--start track physics
+		local pos1  = self.object:getpos()
+		local pos2  = self.cotruck.object:getpos()
+		local vec   = nil
+		if self.position == "front" then
+			vec	= {x=pos2.x-pos1.x, y=0, z=pos2.z-pos1.z}
+		elseif self.position == "rear" then
+			vec = {x=pos1.x-pos2.x, y=0, z=pos1.z-pos2.z}
+		end
+		local node  = minetest.get_node(self.object:getpos()).name
+		local param2 = minetest.get_node(self.object:getpos()).param2
+			
+		--work out direction and vel in straights
+		if node == "trains:track_straight" then
+			if param2 == 0 or param2 == 2 then
+				--z
+				if vec.z > 0 then 
+					self.velocity = ({x=0, y=0, z=-train_speed})
+					self.direction = "west"
+				end
+				if vec.z < 0 then 
+					self.velocity = ({x=0, y=0, z=train_speed})
+					self.direction = "east"
+				end
+			elseif param2 == 1 or param2 == 3 then
+				--x
+				if vec.x > 0 then 
+					self.velocity = ({x=-train_speed, y=0, z=0})
+					self.direction = "south"
+				end
+				if vec.x < 0 then 
+					self.velocity = ({x=train_speed, y=0, z=0})
+					self.direction = "north"
+				end
+			end
+		--work out direction and vel in turns
+		elseif node == "trains:track_turn" then
+			if param2 == 0 then
+				if self.direction == "west" then
+					local center = self.object:getpos()
+					center.x  = math.floor(center.x + 0.5)
+					center.y  = math.floor(center.z + 0.5) 
+					center.z  = math.floor(center.y + 0.5)
+					if pos1.z < center.z then
+						self.velocity = ({x=-train_speed, y=0, z=0})
+						self.direction = "south"
+					end
+				elseif self.direction == "north" then
+					local center = self.object:getpos()
+					center.x  = math.floor(center.x + 0.5)
+					center.y  = math.floor(center.z + 0.5) 
+					center.z  = math.floor(center.y + 0.5)
+					if pos1.x > center.x then
+						self.velocity = ({x=0, y=0, z=train_speed})
+						self.direction = "east"
+					end
+				end
+			elseif param2 == 1 then
+				if self.direction == "south" then
+					local center = self.object:getpos()
+					center.x  = math.floor(center.x + 0.5)
+					center.y  = math.floor(center.z + 0.5) 
+					center.z  = math.floor(center.y + 0.5)
+					if pos1.x < center.x then
+						self.velocity = ({x=0, y=0, z=train_speed})
+						self.direction = "east" 
+					end
+				elseif self.direction == "west" then
+					local center = self.object:getpos()
+					center.x  = math.floor(center.x + 0.5)
+					center.y  = math.floor(center.z + 0.5) 
+					center.z  = math.floor(center.y + 0.5)
+					if pos1.z < center.z then
+						self.velocity = ({x=train_speed, y=0, z=0})
+						self.direction = "north"
+					end
+				end						
+			elseif param2 == 2 then
+				if self.direction == "east" then
+					local center = self.object:getpos()
+					center.x  = math.floor(center.x + 0.5)
+					center.y  = math.floor(center.z + 0.5) 
+					center.z  = math.floor(center.y + 0.5)
+					if pos1.z > center.z then
+						self.velocity = ({x=train_speed, y=0, z=0})
+						self.direction = "north"
+					end
+				elseif self.direction == "south" then
+					local center = self.object:getpos()
+					center.x  = math.floor(center.x + 0.5)
+					center.y  = math.floor(center.z + 0.5) 
+					center.z  = math.floor(center.y + 0.5)
+					if pos1.x < center.x then
+						self.velocity = ({x=0, y=0, z=-train_speed})
+						self.direction = "west"
+					end
+				end
+			elseif param2 == 3 then
+				if self.direction == "north" then
+					local center = self.object:getpos()
+					center.x  = math.floor(center.x + 0.5)
+					center.y  = math.floor(center.z + 0.5) 
+					center.z  = math.floor(center.y + 0.5)
+					if pos1.x > center.x then
+						self.velocity = ({x=0, y=0, z=-train_speed})
+						self.direction = "west"
+					end
+				elseif self.direction == "east" then
+					local center = self.object:getpos()
+					center.x  = math.floor(center.x + 0.5)
+					center.y  = math.floor(center.z + 0.5) 
+					center.z  = math.floor(center.y + 0.5)
+					if pos1.z > center.z then
+						self.velocity = ({x=-train_speed, y=0, z=0})
+						self.direction = "south" 
+					end
+				end
+			end
+		end
+		--do this for turns
+		if self.velocity ~= nil then
+			if self.position == "front" and self.velocity.x == 0 and self.velocity.y == 0 and self.velocity.z == 0 then
+				self.object:setvelocity(self.stored_velocity)
+			end
+		end
+		
+		--correct distance | NOTE: Possibly adjust rear as well to stop the "stretching"
+		if self.position == "front" and self.velocity ~= nil then
+			local distance = math.abs(distance( pos1.x, pos1.z, pos2.x, pos2.z ))
+			--print(dump(distance))
+			if distance > truck_distance then
+				--print("slowing down front")
+				self.velocity.x = self.velocity.x / (distance+8)
+				self.velocity.z = self.velocity.z / (distance+8)
+			elseif distance < truck_distance then
+				--print("speeding up front")
+				self.velocity.x = self.velocity.x * (1+(truck_distance-distance))
+				self.velocity.z = self.velocity.z * (1+(truck_distance-distance))
+			end
+		end
+		--this moves the truck around normally - this always goes last
+		if self.direction ~= nil then
+			self.stored_velocity = self.velocity
+			self.object:setvelocity(self.velocity)
+		end
+	--stop the other if not on track
+	elseif self.on_track == false then
+		print("stopping other")
+		self.object:setvelocity(({x=0, y=0, z=0}))
+		self.cotruck.object:setvelocity(({x=0, y=0, z=0}))
+	end
+end
+
+function distance( x1, y1, x2, y2 )
+	local dx = x1 - x2
+	local dy = y1 - y2
+	return math.sqrt ( dx * dx + dy * dy )
+end
+
+function force_load_train(self)
+	local chunkpos  = self.object:getpos()
+	minetest.forceload_block(chunkpos)
+	minetest.forceload_block({x=chunkpos.x-5, y=chunkpos.y, z=chunkpos.z})
+	minetest.forceload_block({x=chunkpos.x+5, y=chunkpos.y, z=chunkpos.z})
+	minetest.forceload_block({x=chunkpos.x, y=chunkpos.y, z=chunkpos.z-5})
+	minetest.forceload_block({x=chunkpos.x, y=chunkpos.y, z=chunkpos.z+5})
+end

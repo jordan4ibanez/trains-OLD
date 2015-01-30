@@ -1,0 +1,478 @@
+--to make the track wood seperate from the metal, you'll have to make a texture for each side
+--make rails generate with the fire code 000000
+--make the train travel around itself, under it's own power
+--make the train serialize and deserialize it's data
+--have the item id on the 
+--eventually have the train number auto decrease and increase with how many vehicles physically exist in the world
+--force load chunks with the trucks directions --an entire active train or car unless it stops
+--instead of just crafting it, have a rail house that works as a huge crafting table, unmineable, and then have the doors open when the train is done crafting, and make it roll out
+--have the train derail if the collision box of the body comes into contact with a node
+--make sure that it is placed on a solid piece of track without turns
+--make the train be able to go backwards
+--make the train animation based on speed
+--store last position of cotruck, if the same as last then stop
+--make mobs get picked up by minecarts
+--create some kind of thing to slow down the wheels based on how far apart they are
+--have it scan the tracks when coming out of a turn to check if it is wide enough to turn
+
+--for smoother trains only change velocity when comparing the self.track with the one in front and it's different, ONLY CHECK NODE WHEN MATH.FLOOR( POS + 0.5) IS DIFFERENT FROM self.pos!
+
+--[[	IMPORTANT!
+have train table
+have each car and engine be it's own train number
+add each group of entities into it's own train table
+serialize the train table and have it deserialize into a massive table on startup
+
+IF Z STOPS THEN STOP OTHER Z AND SAME WITH X
+
+or get a direct distance from eachother and slow down the truck according to the distance
+
+]]--
+
+--[[		
+		--straight track
+		--rails
+		{0.4, -0.4, -0.5, 0.5, -0.2, 0.5},
+		{-0.5, -0.4, -0.5, -0.4, -0.2, 0.5},
+		--sleeper
+		{-0.7, -0.5, -0.2, 0.7, -0.4, 0.2},
+		
+		--curved track
+		--rails
+		{0.4, -0.4, -0.5, 0.5, -0.2, 0.5},
+		{-0.5, -0.4, -0.5, 0.5, -0.2, -0.4},
+		{-0.5, -0.4, 0.4, -0.4, -0.2, 0.5},
+		--sleeper
+		{-0.7, -0.5, -0.2, 0.7, -0.4, 0.2},
+]]--
+dofile(minetest.get_modpath("trains").."/functions.lua")
+
+train_speed = 5
+truck_distance = 7
+		
+--do this to allow multiple entities to work as one
+train_table = {}
+
+print("---------")
+local file=io.open(minetest.get_worldpath().."/train_id.txt","r")
+if file ~= nil then
+	print("Reading TRAIN ID file")
+	train_id = file:read("*all")
+	file:close()
+	train_id = tonumber(train_id)
+else
+	--file:close()
+	print("Writing TRAIN ID file")
+	local file=io.open(minetest.get_worldpath().."/train_id.txt","w")
+	file:write("0")
+	file:close(file)
+	train_id = 0
+end
+	
+print("---------")
+print("")
+print("")
+print("Current train ID: "..train_id)
+print("")
+print("")
+print("---------")
+
+--These both have the ability to load or set table items because one might load before the other.
+
+minetest.register_entity("trains:truck_front",
+	{
+		hp_max       = 1,
+		physical     = true,
+		weight       = 5,
+		collisionbox = {-0.395,-0.4,-0.395, 0.395,0.5,0.395},
+		collide_with_objects = false,
+		groups       = {"immortal"},
+		is_visible   = false,
+		cotruck      = nil,
+		on_track     = nil,
+		--serialized variables
+		stored_velocity = nil,
+		position     = "front",
+		id           = nil,
+		direction    = nil,
+		velocity     = nil,
+		--deserialization
+		on_activate = function(self,staticdata)
+			self.object:set_armor_groups({immortal=1})
+			--set everything up
+			if self.id == nil then
+				self.id = train_id
+			end
+			--grouping
+			if not train_table[self.id] then
+				train_table[self.id] = {}
+			end
+			train_table[self.id][1] = self.object:get_luaentity()
+			if train_table[self.id][2] ~= nil then
+				self.cotruck = train_table[self.id][2]
+				train_table[self.id][2].cotruck = train_table[self.id][1]
+			end
+
+			--deserialization
+			if staticdata then
+				local data = minetest.deserialize(staticdata)
+				if data then
+					print("deserialize")
+					self.stored_velocity = data.stored_velocity
+					self.position  = data.position
+					self.id        = data.id
+					self.direction = data.direction
+					self.velocity  = data.velocity
+				end
+			end
+		end,
+		
+		--remove entire train
+		on_punch = function(self, hitter)
+			self.object:remove()
+			self.cotruck.object:remove()
+			if train_table[self.id] ~= nil then
+				train_table[self.id][3].object:remove()
+			end
+		end,
+		
+		--serialization and grouping
+		get_staticdata = function(self)			
+			self.tmp = {
+				stored_velocity = self.stored_velocity,
+				position  = self.position,
+				id        = self.id,
+				direction = self.direction,
+				velocity  = self.velocity,
+			}
+			return minetest.serialize(self.tmp)
+		end,		
+		
+		
+		--physics stuff
+		on_step = function(self)
+			force_load_train(self)
+			if self.cotruck ~= nil then
+				train_on_track(self)
+			end
+		end
+})
+
+--########################################################################################################################################################
+
+minetest.register_entity("trains:truck_rear",
+	{
+		hp_max       = 1,
+		physical     = true,
+		weight       = 5,
+		collisionbox = {-0.395,-0.4,-0.395, 0.395,0.5,0.395},
+		collide_with_objects = false,
+		groups       = {"immortal"},
+		is_visible   = false,
+		cotruck      = nil,
+		on_track     = nil,
+		--serialized variables
+		stored_velocity = nil,
+		position     = "rear",
+		id           = nil,
+		direction    = nil,
+		velocity     = nil,
+		--deserialization
+		on_activate = function(self,staticdata)
+			self.object:set_armor_groups({immortal=1})
+			--set everything up
+			if self.id == nil then
+				self.id = train_id
+			end
+			--grouping
+			if not train_table[self.id] then
+				train_table[self.id] = {}
+			end
+			train_table[self.id][2] = self.object:get_luaentity()			
+			if train_table[self.id][1] ~= nil then
+				self.cotruck = train_table[self.id][1]
+				train_table[self.id][1].cotruck = train_table[self.id][2]
+			end
+
+			--deserialization
+			if staticdata then
+				local data = minetest.deserialize(staticdata)
+				if data then
+					self.stored_velocity = data.stored_velocity
+					self.position  = data.position
+					self.id        = data.id
+					self.direction = data.direction
+					self.velocity  = data.velocity
+				end
+			end
+		end,
+		--remove entire train
+		on_punch = function(self, hitter)
+			self.object:remove()
+			self.cotruck.object:remove()
+			if train_table[self.id] ~= nil then
+				train_table[self.id][3].object:remove()
+			end
+		end,
+		
+		--serialization and grouping
+		get_staticdata = function(self)
+			self.tmp = {
+				stored_velocity = self.stored_velocity,
+				position  = self.position,
+				id        = self.id,
+				direction = self.direction,
+				velocity  = self.velocity,
+			}
+			return minetest.serialize(self.tmp)
+		end,
+		
+		--physics stuff
+		on_step = function(self)
+			force_load_train(self)
+			if self.cotruck ~= nil then
+				train_on_track(self)
+			end
+		end
+})
+
+minetest.register_entity("trains:engine",
+	{
+		hp_max       = 1,
+		physical     = true,
+		weight       = 5,
+		collisionbox = {-0.395,-0.4,-0.395, 0.395,0.5,0.395},
+		mesh         = "train.x",
+		visual       = "mesh",
+		visual_size = {x=2, y=2},
+		tiles = {"default_dirt.png","default_dirt.png","default_dirt.png","default_dirt.png","default_dirt.png","default_dirt.png","default_dirt.png","default_dirt.png","default_dirt.png","default_dirt.png",},
+		groups       = {"immortal"},
+		is_visible   = true,
+		--remove entire train
+		on_punch = function(self, hitter)
+			--scan in between the positions to make sure they're all straight
+			if train_table[self.id][1].position == "front" then
+				train_table[self.id][1].position = "rear"
+				train_table[self.id][2].position = "front"
+			elseif train_table[self.id][1].position == "rear" then
+				train_table[self.id][1].position = "front"
+				train_table[self.id][2].position = "rear"
+			end
+
+			train_table[self.id][1].direction = nil
+			train_table[self.id][2].direction = nil
+		end,		
+		--serialized variables
+		id           = nil,
+		--deserialization
+		on_activate = function(self,staticdata)
+			self.object:set_armor_groups({immortal=1})
+			--set everything up
+			if self.id == nil then
+				self.id = train_id
+			end
+			--grouping
+			if not train_table[self.id] then
+				train_table[self.id] = {}
+			end
+			train_table[self.id][3] = self.object:get_luaentity()			
+			--deserialization
+			if staticdata then
+				local data = minetest.deserialize(staticdata)
+				if data then
+					self.id        = data.id
+				end
+			end
+		end,
+		--serialization and grouping
+		get_staticdata = function(self)
+			self.tmp = {
+				id        = self.id,
+			}
+			return minetest.serialize(self.tmp)
+		end,
+		on_step = function(self)
+			if train_table[self.id] ~= nil then
+				if train_table[self.id][1] ~= nil and train_table[self.id][2] ~= nil then
+					--[[
+					---try to fix bugs
+					--reverse the directions
+					local dir1 = train_table[self.id][1].direction
+					local dir2 = train_table[self.id][2].direction
+					
+					
+					if dir1 == "north" then
+						train_table[self.id][1].direction = "south"
+					elseif dir1 == "south" then
+						train_table[self.id][1].direction = "north"
+					elseif dir1 == "east" then
+						train_table[self.id][1].direction = "east"
+					elseif dir1 == "west" then
+						train_table[self.id][1].direction = "west"
+					end
+					
+					if dir2 == "north" then
+						train_table[self.id][2].direction = "south"
+					elseif dir2 == "south" then
+						train_table[self.id][2].direction = "north"
+					elseif dir2 == "east" then
+						train_table[self.id][2].direction = "east"
+					elseif dir2 == "west" then
+						train_table[self.id][2].direction = "west"
+					end
+					]]--
+									
+					--this is pilzadam's mob code, nice work pilzadam, this wouldn't be possible without you!
+					--https://github.com/PilzAdam/mobs/blob/master/api.lua#L262
+					if train_table[self.id][1].position == "front" then
+						--position
+						local pos1  = train_table[self.id][1].object:getpos()
+						local pos2  = train_table[self.id][2].object:getpos()
+						local cpos  = self.object:getpos()
+						local pos   = {x=(pos2.x+pos1.x)/2, y=cpos.y, z=(pos2.z+pos1.z)/2}
+						self.object:moveto(pos, false)
+						--yaw
+						local vec = {x=pos2.x-pos1.x, y=0, z=pos2.z-pos1.z}
+						local yaw = math.atan(vec.z/vec.x)+math.pi/2
+						if pos2.x < pos1.x then
+							yaw = yaw + math.pi
+						end
+						self.object:setyaw(yaw)
+					elseif train_table[self.id][1].position == "rear" then
+						--position
+						local pos1  = train_table[self.id][2].object:getpos()
+						local pos2  = train_table[self.id][1].object:getpos()
+						local cpos  = self.object:getpos()
+						local pos   = {x=(pos2.x+pos1.x)/2, y=cpos.y, z=(pos2.z+pos1.z)/2}
+						self.object:moveto(pos, false)
+						--yaw
+						local vec = {x=pos2.x-pos1.x, y=0, z=pos2.z-pos1.z}
+						local yaw = math.atan(vec.z/vec.x)+math.pi/2
+						if pos2.x < pos1.x then
+							yaw = yaw + math.pi
+						end
+						self.object:setyaw(yaw)
+					end
+				end
+			end
+		end,
+		
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+minetest.register_craftitem("trains:heli", {
+	description = "Train",
+	inventory_image = "heli_inv.png",
+	wield_image = "heli_inv.png",
+	wield_scale = {x=1, y=1, z=1},
+	
+	on_place = function(itemstack, placer, pointed_thing)
+		local pos = pointed_thing.under
+		if pointed_thing.type ~= "node" then
+			return
+		end
+		if minetest.get_node(pointed_thing.above).name ~= "air" then
+			return
+		end
+		if minetest.get_node_group(minetest.get_node(pointed_thing.under).name, "track") == 0 then
+			return
+		end
+		if minetest.get_node(pointed_thing.under).param2 == 0 or minetest.get_node(pointed_thing.under).param2 == 2 then
+			train_id = train_id + 1
+			local front   = minetest.add_entity({x=pos.x,y=pos.y,z=pos.z+(truck_distance/2)}, "trains:truck_front")
+			--local rear    = minetest.add_entity({x=pos.x,y=pos.y,z=pos.z-(truck_distance/2)}, "trains:truck_rear")
+			--local engine  = minetest.add_entity({x=pos.x,y=pos.y+1,z=pos.z}, "trains:engine")
+
+			print("Train ID is now "..train_id)
+			local file=io.open(minetest.get_worldpath().."/train_id.txt","w")
+			file:write(train_id)
+			file:close(file)
+		end
+		if minetest.get_node(pointed_thing.under).param2 == 1 or minetest.get_node(pointed_thing.under).param2 == 3 then
+			train_id = train_id + 1
+			local front   = minetest.add_entity({x=pos.x+(truck_distance/2),y=pos.y,z=pos.z}, "trains:truck_front")
+			--local rear    = minetest.add_entity({x=pos.x-(truck_distance/2),y=pos.y,z=pos.z}, "trains:truck_rear")
+			--local engine  = minetest.add_entity({x=pos.x,y=pos.y+1,z=pos.z}, "trains:engine")
+
+			print("Train ID is now "..train_id)
+			local file=io.open(minetest.get_worldpath().."/train_id.txt","w")
+			file:write(train_id)
+			file:close(file)
+		end
+	end,
+})
+
+minetest.register_node("trains:track_straight", {
+	description = "Railroad Track",
+	tiles = {"default_steel_block.png"},
+	groups = {cracky=3,track=1},
+	--sounds = default.node_sound_stone_defaults(),
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	is_ground_content = true,
+	node_box = {
+		type = "fixed",
+		fixed = {
+		--rails
+		{0.4, -0.4, -0.5, 0.5, -0.2, 0.5},
+		{-0.5, -0.4, -0.5, -0.4, -0.2, 0.5},
+		--sleeper
+		{-0.7, -0.5, -0.2, 0.7, -0.4, 0.2},
+		},
+	},
+	selection_box = {
+		type = "fixed",
+		fixed = {-0.5, -0.5, -0.5, 0.5, -0.2, 0.5},
+		},
+})
+
+
+minetest.register_node("trains:track_turn", {
+	description = "Railroad Track",
+	tiles = {"default_steel_block.png"},
+	groups = {cracky=3,track=1},
+	--sounds = default.node_sound_stone_defaults(),
+	drawtype = "nodebox",
+	paramtype = "light",
+	paramtype2 = "facedir",
+	is_ground_content = true,
+	node_box = {
+		type = "fixed",
+		fixed = {
+		{0.4, -0.4, -0.5, 0.5, -0.2, 0.5},
+		{-0.5, -0.4, -0.5, 0.5, -0.2, -0.4},
+		{-0.5, -0.4, 0.4, -0.4, -0.2, 0.5},
+		--sleeper
+		{-0.7, -0.5, -0.2, 0.7, -0.4, 0.2},
+		},
+	},
+	selection_box = {
+		type = "fixed",
+		fixed = {-0.5, -0.5, -0.5, 0.5, -0.2, 0.5},
+		},
+})

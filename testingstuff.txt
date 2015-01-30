@@ -1,0 +1,42 @@
+		--front
+		on_punch = function(self, hitter)
+			--this is for testing, but could be used for minecarts
+			local pos1 = self.object:getpos()
+			local pos2 = hitter:getpos()
+			local node = minetest.get_node(pos1)
+
+			if minetest.get_node_group(node.name, "track") ~= 0 then
+				if node.param2 == 0 or node.param2 == 2 then
+					--z axis
+					local newspeed = {x=0,y=0,z=pos1.z-pos2.z}
+					self.object:setvelocity(newspeed)
+					self.cotruck.object:setvelocity(newspeed)
+				elseif node.param2 == 1 or node.param2 == 3 then
+					--x axis
+					local newspeed = {x=pos1.x-pos2.x,y=0,z=0}
+					self.object:setvelocity(newspeed)
+					self.cotruck.object:setvelocity(newspeed)
+				end
+			end
+		end,
+		
+		--rear
+		on_punch = function(self, hitter)
+			--this is for testing, but could be used for minecarts
+			local pos1 = self.object:getpos()
+			local pos2 = hitter:getpos()
+			local node = minetest.get_node(pos1)
+			if minetest.get_node_group(node.name, "track") ~= 0 then
+				if node.param2 == 0 or node.param2 == 2 then
+					--z axis
+					local newspeed = {x=0,y=0,z=pos1.z-pos2.z}
+					self.object:setvelocity(newspeed)
+					self.cotruck.object:setvelocity(newspeed)
+				elseif node.param2 == 1 or node.param2 == 3 then
+					--x axis
+					local newspeed = {x=pos1.x-pos2.x,y=0,z=0}
+					self.object:setvelocity(newspeed)
+					self.cotruck.object:setvelocity(newspeed)
+				end
+			end
+		end,
