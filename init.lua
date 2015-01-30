@@ -1,7 +1,3 @@
---If you are reading this, then you know some of the ideas that are going to be put into this mod, do not reveal any of it on the forum so
---that it's a surprise. Also, a bit of these ideas are deprecated, old, or are already complete. When I am satisfied with the code then
---it will be put on github. If you want to be the original sloppy setvelocity code it's in the functions backup file.
-
 --to make the track wood seperate from the metal, you'll have to make a texture for each side
 --make rails generate with the fire code 000000
 --make the train travel around itself, under it's own power
